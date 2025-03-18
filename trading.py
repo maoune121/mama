@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # تحميل المتغيرات البيئية من ملف .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHECK_INTERVAL = 30  # فحص الأسعار كل 30 ثانية
+CHECK_INTERVAL = 29  # فحص الأسعار كل 29 ثانية
 
 # إعداد سجل التصحيح
 logging.basicConfig(level=logging.DEBUG)
@@ -62,7 +62,7 @@ async def check_prices():
                     symbol=symbol,
                     screener="forex",
                     exchange="OANDA",
-                    interval=Interval.INTERVAL_30_MINUTES  # استخدام شمعة 30 دقيقة
+                    interval=Interval.INTERVAL_5_MINUTES  # استخدام شمعة 5 دقائق
                 )
                 analysis = handler.get_analysis()
                 indicators = analysis.indicators
@@ -75,7 +75,7 @@ async def check_prices():
                     channel = bot.get_channel(channel_id)
                     if channel:
                         await channel.send(
-                            f"🚨 تنبيه: {symbol} لمس السعر المطلوب {target_price} خلال آخر 30 دقيقة!"
+                            f"🚨 تنبيه: {symbol} لمس السعر المطلوب {target_price} خلال آخر 5 دقائق!"
                         )
                         logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
                     # حذف التنبيه بعد إرساله لمنع التكرار
@@ -87,14 +87,14 @@ async def check_prices():
 async def on_ready():
     logger.info(f"✅ تم تسجيل الدخول كـ {bot.user}")
     
-    # عند بدء التشغيل، نقوم بفحص الرسائل في كل قناة نصية في كل سيرفر لاستعادة التنبيهات غير المنفذة
+    # عند بدء التشغيل، نقوم بفحص الرسائل في كل قناة نصية لكل سيرفر لاستعادة التنبيهات غير المنفذة
     for guild in bot.guilds:
         for channel in guild.text_channels:
             try:
                 # جلب آخر 50 رسالة من القناة
                 messages = [msg async for msg in channel.history(limit=50)]
                 for msg in messages:
-                    # نبحث فقط عن رسائل البوت
+                    # نبحث فقط عن رسائل البوت (Trading Alert #0520)
                     if msg.author.id == bot.user.id:
                         content = msg.content
                         # إذا كانت الرسالة تحتوي على "تم ضبط تنبيه" ولا تحتوي على "تنبيه:"
@@ -108,7 +108,7 @@ async def on_ready():
                                     target_price_found = float(match.group(2))
                                 except ValueError:
                                     continue
-                                # التأكد من عدم وجود رسالة تنبيه (🚨 تنبيه:) لنفس العملة والسعر في نفس المجموعة من الرسائل
+                                # التأكد من عدم وجود رسالة تنبيه (🚨 تنبيه:) لنفس العملة والسعر في نفس مجموعة الرسائل
                                 alert_already_sent = False
                                 for m in messages:
                                     if m.author.id == bot.user.id and "تنبيه:" in m.content:
