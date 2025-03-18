@@ -1,1 +1,1 @@
-worker: python tradingview.py
+worker: python trading.py
