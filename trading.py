@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands, tasks
 from tradingview_ta import TA_Handler, Interval
 import logging
-import os  # لإدارة متغيرات البيئة
+import os
+from keep_alive import keep_alive  # تم إضافة السطر هنا
 
 # إعداد سجل التصحيح
 logging.basicConfig(level=logging.DEBUG)
@@ -31,7 +32,7 @@ async def alert(ctx, symbol: str, target_price: float):
         "channel_id": ctx.channel.id
     }
     alerts.append(alert_data)
-    await ctx.send(f"تم ضبط تنبيه لـ **{alert_data['symbol']}** عند السعر **{alert_data['target_price']}**.")
+    await ctx.send(f"تم ضبط تنبيه لـ **{alert_data['symbol']}** عند السعر **{alert_data['target_price']}** في هذه القناة.")
     logger.debug(f"تنبيه جديد مضاف: {alert_data}")
 
 @tasks.loop(seconds=30)  # فحص كل 30 ثانية للتجربة
@@ -82,10 +83,9 @@ async def on_ready():
     logger.info(f"تم تسجيل الدخول كـ {bot.user}")
     check_prices.start()
 
-# قراءة التوكن من متغير البيئة DISCORD_BOT_TOKEN
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+# تشغيل keep_alive للحفاظ على تشغيل البوت
+keep_alive()
 
-if not TOKEN:
-    logger.error("لم يتم العثور على توكن البوت! تأكد من إضافة DISCORD_BOT_TOKEN في المتغيرات.")
-else:
-    bot.run(TOKEN)
+# جلب التوكن من المتغيرات البيئية
+TOKEN = os.getenv("DISCORD_TOKEN")
+bot.run(TOKEN)
