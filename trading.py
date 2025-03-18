@@ -25,15 +25,15 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # قائمة التنبيهات المخزنة: مفهرسة حسب معرف السيرفر ثم حسب العملة.
-# كل تنبيه عبارة عن قاموس يحتوي على:
+# كل تنبيه يحتوي على:
 # - target_price: السعر الهدف
 # - channel_id: معرف القناة
-# - candle_buffer: قائمة (list) لتخزين بيانات آخر شمعتين، كل شمعة عبارة عن dict يحتوي على "time", "high", "low"
+# - candle_buffer: قائمة (list) لتخزين بيانات آخر شمعتين؛ كل شمعة عبارة عن dict يحتوي على "time", "high", "low"
 alerts = {}
 
 def update_candle_buffer(buffer, new_candle):
     """
-    يقوم بتحديث المخزن (buffer) ليحتوي على آخر شمعتين فقط.
+    يحدث المخزن (buffer) بحيث يحتوي فقط على آخر شمعتين.
     """
     if len(buffer) == 2:
         buffer.pop(0)
@@ -86,23 +86,23 @@ async def check_prices():
                 # تحديث المخزن الخاص بهذا التنبيه
                 alert_data["candle_buffer"] = update_candle_buffer(alert_data["candle_buffer"], new_candle)
 
-                # إذا كانت لدينا بيانات الشمعتين الأخيرتين، نجمعهما
-                if len(alert_data["candle_buffer"]) == 2:
-                    combined_high = max(alert_data["candle_buffer"][0]["high"],
-                                        alert_data["candle_buffer"][1]["high"])
-                    combined_low = min(alert_data["candle_buffer"][0]["low"],
-                                       alert_data["candle_buffer"][1]["low"])
-                    logger.debug(f"🔹 {symbol}: Combined High={combined_high}, Combined Low={combined_low}")
-
-                    # التحقق مما إذا كان السعر الهدف ضمن النطاق الموحد للشمعتين
-                    if combined_low <= target_price <= combined_high:
+                # إذا كانت لدينا بيانات الشمعتين، نقوم بفحص كل شمعة على حدة
+                if len(alert_data["candle_buffer"]) >= 1:
+                    alert_triggered = False
+                    for candle in alert_data["candle_buffer"]:
+                        c_high = candle["high"]
+                        c_low = candle["low"]
+                        if c_low <= target_price <= c_high:
+                            alert_triggered = True
+                            break
+                    if alert_triggered:
                         channel = bot.get_channel(channel_id)
                         if channel:
                             await channel.send(
-                                f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** باستخدام آخر شمعتين!"
+                                f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر 5 دقائق!"
                             )
                             logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
-                        # حذف التنبيه بعد الإرسال لمنع التكرار
+                        # حذف التنبيه بعد إرساله لمنع التكرار
                         del alerts[guild_id][symbol]
             except Exception as e:
                 logger.error(f"⚠️ خطأ أثناء جلب بيانات {symbol}: {e}")
@@ -111,14 +111,14 @@ async def check_prices():
 async def on_ready():
     logger.info(f"✅ تم تسجيل الدخول كـ {bot.user}")
     
-    # عند بدء التشغيل، فحص آخر رسالة مرسلة من البوت في كل قناة بالنصوص في كل السيرفرات
+    # عند بدء التشغيل، فحص آخر رسالة مرسلة من البوت في كل قناة بالنصوص في جميع السيرفرات
     for guild in bot.guilds:
         for channel in guild.text_channels:
             try:
                 async for msg in channel.history(limit=1):
                     if msg.author == bot.user:
                         content = msg.content
-                        # إذا كانت الرسالة تتبع تنسيق ضبط التنبيه
+                        # إذا كانت الرسالة تتبع تنسيق ضبط التنبيه وليس التنبيه الفعلي
                         if "تم ضبط تنبيه" in content and "تنبيه:" not in content:
                             pattern = r"تم ضبط تنبيه لـ \*\*(.+?)\*\* عند السعر \*\*(.+?)\*\* في هذه القناة\."
                             match = re.search(pattern, content)
