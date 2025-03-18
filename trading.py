@@ -10,13 +10,13 @@ from dotenv import load_dotenv
 # تحميل المتغيرات البيئية من ملف .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHECK_INTERVAL = 30  # فحص كل 30 ثانية
+CHECK_INTERVAL = 30  # فحص الأسعار كل 30 ثانية
 
 # إعداد سجل التصحيح
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('discord')
 
-# تفعيل Intents المطلوبة
+# تفعيل الـ Intents المطلوبة
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -34,7 +34,7 @@ alerts = {}
 async def alert(ctx, symbol: str, target_price: float):
     """
     أمر يتم استدعاؤه بالشكل:
-    /alert GBPUSD 1.29963
+    /alert GBPUSD 1.2999
     حيث يتم حفظ التنبيه مع معرف القناة التي تم فيها ضبط الأمر.
     """
     if ctx.guild.id not in alerts:
@@ -75,7 +75,7 @@ async def check_prices():
                     channel = bot.get_channel(channel_id)
                     if channel:
                         await channel.send(
-                            f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر 30 دقيقة!"
+                            f"🚨 تنبيه: {symbol} لمس السعر المطلوب {target_price} خلال آخر 30 دقيقة!"
                         )
                         logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
                     # حذف التنبيه بعد إرساله لمنع التكرار
@@ -87,32 +87,44 @@ async def check_prices():
 async def on_ready():
     logger.info(f"✅ تم تسجيل الدخول كـ {bot.user}")
     
-    # عند بدء التشغيل، فحص آخر رسالة مرسلة من البوت في كل قناة بالنصوص في جميع السيرفرات
+    # عند بدء التشغيل، نقوم بفحص كل قناة في كل سيرفر لاستعادة التنبيهات غير المنفذة
     for guild in bot.guilds:
         for channel in guild.text_channels:
             try:
-                async for msg in channel.history(limit=1):
+                # جلب آخر 10 رسائل من القناة (للزيادة في احتمالية العثور على الرسائل المطلوبة)
+                messages = await channel.history(limit=10).flatten()
+                for msg in messages:
+                    # نبحث فقط عن رسائل البوت
                     if msg.author == bot.user:
                         content = msg.content
-                        # إذا كانت الرسالة تتبع تنسيق ضبط التنبيه وليس التنبيه الفعلي
+                        # إذا كانت الرسالة من نوع "تم ضبط تنبيه ..." (أي لم يتم إرسال التنبيه بعد)
                         if "تم ضبط تنبيه" in content and "تنبيه:" not in content:
+                            # استخراج العملة والسعر باستخدام تعبير منتظم
                             pattern = r"تم ضبط تنبيه لـ \*\*(.+?)\*\* عند السعر \*\*(.+?)\*\* في هذه القناة\."
                             match = re.search(pattern, content)
                             if match:
-                                symbol_found = match.group(1)
+                                symbol_found = match.group(1).upper()
                                 try:
                                     target_price_found = float(match.group(2))
                                 except ValueError:
                                     continue
-                                if guild.id not in alerts:
-                                    alerts[guild.id] = {}
-                                if symbol_found.upper() not in alerts[guild.id]:
-                                    alerts[guild.id][symbol_found.upper()] = {
-                                        "target_price": target_price_found,
-                                        "channel_id": channel.id
-                                    }
-                                    logger.debug(f"↻ إعادة ضبط تنبيه: {symbol_found.upper()} عند {target_price_found} في القناة {channel.id}")
-                        # إذا كانت الرسالة تحتوي على تنبيه مفعل (مثال: "🚨 تنبيه: ...") فلا نقوم بأي إجراء
+                                # التأكد من عدم وجود رسالة تنبيه (🚨 تنبيه:) لاحقة لنفس العملة والسعر
+                                alert_already_sent = False
+                                for m in messages:
+                                    if m.author == bot.user and "تنبيه:" in m.content:
+                                        if symbol_found in m.content and str(target_price_found) in m.content:
+                                            alert_already_sent = True
+                                            break
+                                if not alert_already_sent:
+                                    # إعادة تسجيل التنبيه في القائمة
+                                    if guild.id not in alerts:
+                                        alerts[guild.id] = {}
+                                    if symbol_found not in alerts[guild.id]:
+                                        alerts[guild.id][symbol_found] = {
+                                            "target_price": target_price_found,
+                                            "channel_id": channel.id
+                                        }
+                                        logger.debug(f"↻ إعادة ضبط تنبيه: {symbol_found} عند {target_price_found} في القناة {channel.id}")
             except Exception as e:
                 logger.error(f"❌ خطأ في قراءة قناة {channel.name}: {e}")
     
