@@ -1,3 +1,4 @@
 discord.py
-tradingview-ta
-requests
+tradingview_ta
+Flask
+python-dotenv
