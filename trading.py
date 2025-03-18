@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # تحميل المتغيرات البيئية من ملف .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHECK_INTERVAL = 30  # ثواني بين كل فحص
+CHECK_INTERVAL = 27  # فحص كل 27 ثانية
 
 # إعداد سجل التصحيح
 logging.basicConfig(level=logging.DEBUG)
@@ -21,7 +21,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 
-# إنشاء البوت
+# إنشاء البوت مع بادئة الأوامر "/"
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # قائمة التنبيهات المخزنة: مفهرسة حسب معرف السيرفر ثم العملة
@@ -31,7 +31,7 @@ alerts = {}
 async def alert(ctx, symbol: str, target_price: float):
     """
     أمر يتم استدعاؤه بالشكل:
-    /alert USDCAD 1.9
+    /alert GBPUSD 1.29963
     حيث يتم حفظ التنبيه مع معرف القناة التي تم فيها ضبط الأمر.
     """
     if ctx.guild.id not in alerts:
@@ -49,7 +49,7 @@ async def alert(ctx, symbol: str, target_price: float):
 @tasks.loop(seconds=CHECK_INTERVAL)
 async def check_prices():
     logger.debug("🔎 بدء فحص الأسعار...")
-    
+
     # المرور على التنبيهات لكل سيرفر
     for guild_id, guild_alerts in list(alerts.items()):
         for symbol, alert_data in list(guild_alerts.items()):
@@ -61,18 +61,19 @@ async def check_prices():
                     symbol=symbol,
                     screener="forex",
                     exchange="OANDA",
-                    interval=Interval.INTERVAL_1_MINUTE
+                    interval=Interval.INTERVAL_5_MINUTES  # استخدام شمعة 5 دقائق
                 )
-                analysis = handler.get_analysis().indicators
-                high_price = float(analysis.get('high', 0))
-                low_price = float(analysis.get('low', 0))
+                analysis = handler.get_analysis()
+                indicators = analysis.indicators
+                high_price = float(indicators.get('high', 0))
+                low_price = float(indicators.get('low', 0))
                 logger.debug(f"🔹 {symbol}: High={high_price}, Low={low_price}")
                 
-                # تحقق إذا كان السعر المستهدف ضمن نطاق الشمعة
+                # التحقق مما إذا كان السعر الهدف ضمن نطاق الشمعة
                 if low_price <= target_price <= high_price:
                     channel = bot.get_channel(channel_id)
                     if channel:
-                        await channel.send(f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر دقيقة!")
+                        await channel.send(f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر 5 دقائق!")
                         logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
                     del alerts[guild_id][symbol]
             except Exception as e:
@@ -89,33 +90,31 @@ async def on_ready():
                 async for msg in channel.history(limit=1):
                     if msg.author == bot.user:
                         content = msg.content
-                        # إذا كانت الرسالة تحتوي على نص ضبط التنبيه
-                        # مثال: "تم ضبط تنبيه لـ USDCAD عند السعر 1.9 في هذه القناة."
+                        # إذا كانت الرسالة تتبع تنسيق ضبط التنبيه
                         if "تم ضبط تنبيه" in content and "تنبيه:" not in content:
                             pattern = r"تم ضبط تنبيه لـ \*\*(.+?)\*\* عند السعر \*\*(.+?)\*\* في هذه القناة\."
                             match = re.search(pattern, content)
                             if match:
-                                symbol = match.group(1)
+                                symbol_found = match.group(1)
                                 try:
-                                    target_price = float(match.group(2))
+                                    target_price_found = float(match.group(2))
                                 except ValueError:
                                     continue
-                                # إعادة حفظ التنبيه إذا لم يكن موجودًا
                                 if guild.id not in alerts:
                                     alerts[guild.id] = {}
-                                if symbol.upper() not in alerts[guild.id]:
-                                    alerts[guild.id][symbol.upper()] = {
-                                        "target_price": target_price,
+                                if symbol_found.upper() not in alerts[guild.id]:
+                                    alerts[guild.id][symbol_found.upper()] = {
+                                        "target_price": target_price_found,
                                         "channel_id": channel.id
                                     }
-                                    logger.debug(f"↻ إعادة ضبط تنبيه: {symbol.upper()} عند {target_price} في القناة {channel.id}")
-                        # إذا كانت الرسالة تحتوي على تنبيه مفعل (مثال: "🚨 تنبيه: USDCAD لمس السعر المطلوب ...") فلا نقوم بأي إجراء
+                                    logger.debug(f"↻ إعادة ضبط تنبيه: {symbol_found.upper()} عند {target_price_found} في القناة {channel.id}")
+                        # إذا كانت الرسالة تحتوي على تنبيه مفعل (مثال: "🚨 تنبيه: ...") فلا نقوم بأي إجراء
             except Exception as e:
                 logger.error(f"❌ خطأ في قراءة قناة {channel.name}: {e}")
     
     # بدء مهمة فحص الأسعار
     check_prices.start()
 
-# بدء keep_alive ثم تشغيل البوت
+# بدء خادم keep_alive ثم تشغيل البوت
 keep_alive()
 bot.run(TOKEN)
