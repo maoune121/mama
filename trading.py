@@ -1,30 +1,38 @@
+import os
 import discord
 from discord.ext import commands, tasks
 from tradingview_ta import TA_Handler, Interval
 import logging
-import os
-from keep_alive import keep_alive  # تم إضافة السطر هنا
+from keep_alive import keep_alive  # Import the keep_alive function
+from dotenv import load_dotenv
 
-# إعداد سجل التصحيح
+# Load environment variables from .env file
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+# Start the keep-alive server
+keep_alive()
+
+# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('discord')
 
-# تفعيل الـ Intents مع تفعيل صلاحية قراءة محتوى الرسائل
+# Enable intents with message content
 intents = discord.Intents.default()
 intents.message_content = True
 
-# إنشاء البوت مع تعيين بادئة الأوامر (prefix="/")
+# Create the bot with the command prefix "/"
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# قائمة التنبيهات: تحتوي على تنبيه لكل طلب يشمل رمز العملة/المؤشر، السعر المستهدف، ومعرف القناة
+# Alerts list: stores an alert for each request (symbol, target price, channel id)
 alerts = []
 
 @bot.command()
 async def alert(ctx, symbol: str, target_price: float):
     """
-    أمر يتم استدعاؤه بالشكل:
+    Command format:
     /alert usdcad 1.427822
-    حيث يتم حفظ التنبيه مع معرف القناة التي كتب فيها الأمر.
+    Stores an alert with the channel id where the command was issued.
     """
     alert_data = {
         "symbol": symbol.upper(),
@@ -35,7 +43,7 @@ async def alert(ctx, symbol: str, target_price: float):
     await ctx.send(f"تم ضبط تنبيه لـ **{alert_data['symbol']}** عند السعر **{alert_data['target_price']}** في هذه القناة.")
     logger.debug(f"تنبيه جديد مضاف: {alert_data}")
 
-@tasks.loop(seconds=30)  # فحص كل 30 ثانية للتجربة
+@tasks.loop(seconds=30)  # Check every 30 seconds for testing
 async def check_prices():
     logger.debug("بدء فحص الأسعار...")
     alerts_to_remove = []
@@ -49,16 +57,16 @@ async def check_prices():
             logger.debug(f"فحص {symbol} مع السعر المستهدف {target_price}")
             handler = TA_Handler(
                 symbol=symbol,
-                screener="forex",     # بيانات الفوركس لجميع أزواج العملات
-                exchange="OANDA",     # استخدام منصة OANDA
-                interval=Interval.INTERVAL_1_MINUTE  # إطار زمني لمدة دقيقة واحدة للتجربة
+                screener="forex",     # Forex data for all currency pairs
+                exchange="OANDA",     # Using OANDA platform
+                interval=Interval.INTERVAL_1_MINUTE  # 1-minute interval for testing
             )
             analysis = handler.get_analysis().indicators
             high_price = float(analysis.get('high', 0))
             low_price = float(analysis.get('low', 0))
             logger.debug(f"الشمعة الحالية لـ {symbol}: High={high_price} و Low={low_price}")
             
-            # تحقق ما إذا كان السعر المستهدف يقع ضمن نطاق الشمعة (بين low و high)
+            # Check if the target price falls within the candle's range (between low and high)
             if low_price <= target_price <= high_price:
                 channel = bot.get_channel(channel_id)
                 if channel:
@@ -72,7 +80,7 @@ async def check_prices():
         except Exception as e:
             logger.error(f"خطأ في جلب البيانات لـ {symbol}: {e}")
     
-    # إزالة التنبيهات التي تم إرسال الإشعار لها
+    # Remove alerts that have been notified
     for alert_data in alerts_to_remove:
         if alert_data in alerts:
             alerts.remove(alert_data)
@@ -83,9 +91,4 @@ async def on_ready():
     logger.info(f"تم تسجيل الدخول كـ {bot.user}")
     check_prices.start()
 
-# تشغيل keep_alive للحفاظ على تشغيل البوت
-keep_alive()
-
-# جلب التوكن من المتغيرات البيئية
-TOKEN = os.getenv("DISCORD_TOKEN")
 bot.run(TOKEN)
