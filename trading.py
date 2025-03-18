@@ -9,92 +9,89 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))  # Set your channel ID in .env
+GUILD_ID = int(os.getenv("DISCORD_GUILD_ID"))  # السيرفر ID
+CHECK_INTERVAL = 30  # عدد الثواني بين كل فحص
 
-# Set up logging
+# إعداد سجل التصحيح
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('discord')
 
-# Enable intents with message content
+# تفعيل الـ Intents مع تفعيل صلاحية قراءة محتوى الرسائل
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
 
-# Create the bot with the command prefix "/"
+# إنشاء البوت مع تعيين بادئة الأوامر (prefix="/")
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# Alerts list: stores an alert for each request (symbol, target price, channel id)
-alerts = []
+# قائمة التنبيهات المخزنة
+alerts = {}
 
 @bot.command()
 async def alert(ctx, symbol: str, target_price: float):
     """
-    Command usage:
+    أمر يتم استدعاؤه بالشكل:
     /alert usdcad 1.427822
-    Stores an alert with the channel ID where the command was issued.
+    حيث يتم حفظ التنبيه مع معرف القناة التي كتب فيها الأمر.
     """
-    alert_data = {
-        "symbol": symbol.upper(),
+    if ctx.guild.id not in alerts:
+        alerts[ctx.guild.id] = {}
+
+    alerts[ctx.guild.id][symbol.upper()] = {
         "target_price": target_price,
         "channel_id": ctx.channel.id
     }
-    alerts.append(alert_data)
-    await ctx.send(f"تم ضبط تنبيه لـ **{alert_data['symbol']}** عند السعر **{alert_data['target_price']}** في هذه القناة.")
-    logger.debug(f"تنبيه جديد مضاف: {alert_data}")
+    
+    await ctx.send(f"✅ تم ضبط تنبيه لـ **{symbol.upper()}** عند السعر **{target_price}** في هذه القناة.")
+    logger.debug(f"تنبيه جديد مضاف: {symbol.upper()} عند {target_price} في السيرفر {ctx.guild.id}")
 
-@tasks.loop(seconds=30)  # Check every 30 seconds
+@tasks.loop(seconds=CHECK_INTERVAL)
 async def check_prices():
-    logger.debug("بدء فحص الأسعار...")
-    alerts_to_remove = []
-    
-    for alert_data in alerts:
-        symbol = alert_data["symbol"]
-        target_price = alert_data["target_price"]
-        channel_id = alert_data["channel_id"]
-        
-        try:
-            logger.debug(f"فحص {symbol} مع السعر المستهدف {target_price}")
-            handler = TA_Handler(
-                symbol=symbol,
-                screener="forex",     # Forex data for all currency pairs
-                exchange="OANDA",     # Using OANDA platform
-                interval=Interval.INTERVAL_1_MINUTE  # 1-minute interval for testing
-            )
-            analysis = handler.get_analysis().indicators
-            high_price = float(analysis.get('high', 0))
-            low_price = float(analysis.get('low', 0))
-            logger.debug(f"الشمعة الحالية لـ {symbol}: High={high_price} و Low={low_price}")
-            
-            # Check if the target price falls within the candle's range (between low and high)
-            if low_price <= target_price <= high_price:
+    logger.debug("🔎 بدء فحص الأسعار...")
+
+    for guild_id, guild_alerts in alerts.items():
+        for symbol, alert_data in guild_alerts.items():
+            target_price = alert_data["target_price"]
+            channel_id = alert_data["channel_id"]
+
+            try:
+                handler = TA_Handler(
+                    symbol=symbol,
+                    screener="forex",
+                    exchange="OANDA",
+                    interval=Interval.INTERVAL_1_MINUTE
+                )
+                analysis = handler.get_analysis().indicators
+                high_price = float(analysis.get('high', 0))
+                low_price = float(analysis.get('low', 0))
+                logger.debug(f"🔹 {symbol}: High={high_price}, Low={low_price}")
+
+                # تحقق من آخر رسالة مرسلة في القناة
                 channel = bot.get_channel(channel_id)
-                if channel:
-                    await channel.send(
-                        f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر دقيقة!"
-                    )
-                    logger.debug(f"تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
-                alerts_to_remove.append(alert_data)
-            else:
-                logger.debug(f"السعر المستهدف {target_price} ليس ضمن نطاق الشمعة ({low_price} - {high_price}) لـ {symbol}")
-        except Exception as e:
-            logger.error(f"خطأ في جلب البيانات لـ {symbol}: {e}")
-    
-    # Remove alerts that have been notified
-    for alert_data in alerts_to_remove:
-        if alert_data in alerts:
-            alerts.remove(alert_data)
-            logger.debug(f"تم إزالة التنبيه: {alert_data}")
+                if not channel:
+                    logger.error(f"❌ القناة {channel_id} غير موجودة!")
+                    continue
+                
+                async for last_message in channel.history(limit=1):
+                    if last_message.author == bot.user and "تم ضبط التنبيه" in last_message.content:
+                        # أضف هذا التنبيه للقائمة لأنه لم يصل بعد
+                        if guild_id not in alerts:
+                            alerts[guild_id] = {}
+                        alerts[guild_id][symbol] = alert_data
+
+                # تحقق إذا السعر وصل إلى الهدف
+                if low_price <= target_price <= high_price:
+                    await channel.send(f"🚨 **{symbol}** لمس السعر المطلوب **{target_price}**!")
+                    del alerts[guild_id][symbol]
+                    logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
+            except Exception as e:
+                logger.error(f"⚠️ خطأ أثناء جلب بيانات {symbol}: {e}")
 
 @bot.event
 async def on_ready():
-    logger.info(f"تم تسجيل الدخول كـ {bot.user}")
-    # Send a startup message to a specific channel
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send("✅ **البوت جاهز ويعمل الآن!**")
-    else:
-        logger.error("تعذر العثور على القناة. تأكد من صحة CHANNEL_ID.")
+    logger.info(f"✅ تم تسجيل الدخول كـ {bot.user}")
     check_prices.start()
 
-# Start the keep-alive server and then run the bot
+# تشغيل البوت
 keep_alive()
 bot.run(TOKEN)
