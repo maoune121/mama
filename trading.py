@@ -7,40 +7,39 @@ import logging
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 
-# تحميل المتغيرات البيئية من ملف .env
+# Load environment variables from .env
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-CHECK_INTERVAL = 29  # فحص الأسعار كل 29 ثانية
+CHECK_INTERVAL = 29  # Check every 29 seconds
 
-# إعداد سجل التصحيح
+# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('discord')
 
-# تفعيل الـ Intents المطلوبة
+# Enable necessary intents
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 
-# إنشاء البوت مع بادئة الأوامر "/"
+# Create the bot with command prefix "/"
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# قائمة التنبيهات المخزنة: 
-# alerts[guild_id] = list of alert dicts, each dict has keys: "symbol", "target_price", "channel_id"
+# Stored alerts: {guild_id: [alert_dict, ...]}
+# Each alert dict contains: "symbol", "target_price", "channel_id"
 alerts = {}
 
 @bot.command()
 async def alert(ctx, symbol: str, target_price: float):
     """
-    أمر يتم استدعاؤه بالشكل:
+    Command usage:
     /alert GBPUSD 1.2999
-    حيث يتم حفظ التنبيه مع معرف القناة التي تم فيها ضبط الأمر.
+    Stores an alert with the channel ID where the command was issued.
     """
     guild_id = ctx.guild.id
     channel_id = ctx.channel.id
     alert_obj = {"symbol": symbol.upper(), "target_price": target_price, "channel_id": channel_id}
     if guild_id not in alerts:
         alerts[guild_id] = []
-    # إضافة التنبيه حتى وإن كان هناك تنبيه سابق لنفس العملة والسعر
     alerts[guild_id].append(alert_obj)
     
     await ctx.send(f"✅ تم ضبط تنبيه لـ **{symbol.upper()}** عند السعر **{target_price}** في هذه القناة.")
@@ -51,7 +50,6 @@ async def check_prices():
     logger.debug("🔎 Checking prices...")
     # Iterate over each guild's alerts
     for guild_id, guild_alerts in list(alerts.items()):
-        # Create a copy of the list to iterate over while possibly removing items
         for alert_obj in guild_alerts.copy():
             symbol = alert_obj["symbol"]
             target_price = alert_obj["target_price"]
@@ -77,15 +75,13 @@ async def check_prices():
                         )
                         logger.info(f"Alert triggered for {symbol} at {target_price} in channel {channel_id}")
                         guild_alerts.remove(alert_obj)
-                    else:
-                        await channel.send(f"🔄 **{symbol}**: لم يصل إلى **{target_price}** بعد.")
             except Exception as e:
                 logger.error(f"Error fetching data for {symbol}: {e}")
 
 @bot.event
 async def on_ready():
     logger.info(f"✅ Logged in as {bot.user}")
-    # On startup, scan each text channel in every guild for untriggered alerts
+    # On startup, scan each text channel in every guild to restore untriggered alerts
     for guild in bot.guilds:
         if guild.id not in alerts:
             alerts[guild.id] = []
@@ -94,10 +90,10 @@ async def on_ready():
                 # Get the last 50 messages from the channel
                 messages = [msg async for msg in channel.history(limit=50)]
                 for msg in messages:
-                    # Only consider messages sent by this bot (Trading Alert)
+                    # Consider only messages sent by this bot
                     if msg.author.id == bot.user.id:
                         content = msg.content
-                        # If message contains "تم ضبط تنبيه" and does NOT contain "تنبيه:" (i.e. not triggered)
+                        # Look for messages with "تم ضبط تنبيه" that do NOT contain "تنبيه:"
                         if "تم ضبط تنبيه" in content and "تنبيه:" not in content:
                             pattern = r"تم ضبط تنبيه لـ \*\*(.+?)\*\* عند السعر \*\*(.+?)\*\* في هذه القناة\."
                             match = re.search(pattern, content)
@@ -107,7 +103,7 @@ async def on_ready():
                                     target_price_found = float(match.group(2))
                                 except ValueError:
                                     continue
-                                # Check if a triggered alert message already exists for this alert in the channel
+                                # Check if a triggered alert message exists for this symbol/price
                                 alert_already_sent = False
                                 for m in messages:
                                     if m.author.id == bot.user.id and "تنبيه:" in m.content:
@@ -115,9 +111,9 @@ async def on_ready():
                                             alert_already_sent = True
                                             break
                                 if not alert_already_sent:
-                                    # Before adding, check if this same alert is already in our list
+                                    # Add the alert if it doesn't already exist in our list
                                     exists = any(
-                                        a["symbol"] == symbol_found and a["target_price"] == target_price_found
+                                        a["symbol"] == symbol_found and a["target_price"] == target_price_found 
                                         for a in alerts[guild.id]
                                     )
                                     if not exists:
@@ -129,6 +125,7 @@ async def on_ready():
                                         logger.debug(f"Restored alert: {symbol_found} at {target_price_found} in channel {channel.id}")
             except Exception as e:
                 logger.error(f"Error reading channel {channel.name}: {e}")
+    
     check_prices.start()
 
 # Start keep_alive server and run the bot
