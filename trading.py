@@ -9,9 +9,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-
-# Start the keep-alive server
-keep_alive()
+CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))  # Set your channel ID in .env
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -30,9 +28,9 @@ alerts = []
 @bot.command()
 async def alert(ctx, symbol: str, target_price: float):
     """
-    Command format:
+    Command usage:
     /alert usdcad 1.427822
-    Stores an alert with the channel id where the command was issued.
+    Stores an alert with the channel ID where the command was issued.
     """
     alert_data = {
         "symbol": symbol.upper(),
@@ -43,7 +41,7 @@ async def alert(ctx, symbol: str, target_price: float):
     await ctx.send(f"تم ضبط تنبيه لـ **{alert_data['symbol']}** عند السعر **{alert_data['target_price']}** في هذه القناة.")
     logger.debug(f"تنبيه جديد مضاف: {alert_data}")
 
-@tasks.loop(seconds=30)  # Check every 30 seconds for testing
+@tasks.loop(seconds=30)  # Check every 30 seconds
 async def check_prices():
     logger.debug("بدء فحص الأسعار...")
     alerts_to_remove = []
@@ -89,6 +87,14 @@ async def check_prices():
 @bot.event
 async def on_ready():
     logger.info(f"تم تسجيل الدخول كـ {bot.user}")
+    # Send a startup message to a specific channel
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send("✅ **البوت جاهز ويعمل الآن!**")
+    else:
+        logger.error("تعذر العثور على القناة. تأكد من صحة CHANNEL_ID.")
     check_prices.start()
 
+# Start the keep-alive server and then run the bot
+keep_alive()
 bot.run(TOKEN)
