@@ -24,8 +24,21 @@ intents.guilds = True
 # إنشاء البوت مع بادئة الأوامر "/"
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# قائمة التنبيهات المخزنة: مفهرسة حسب معرف السيرفر ثم العملة
+# قائمة التنبيهات المخزنة: مفهرسة حسب معرف السيرفر ثم حسب العملة.
+# كل تنبيه عبارة عن قاموس يحتوي على:
+# - target_price: السعر الهدف
+# - channel_id: معرف القناة
+# - candle_buffer: قائمة (list) لتخزين بيانات آخر شمعتين، كل شمعة عبارة عن dict يحتوي على "time", "high", "low"
 alerts = {}
+
+def update_candle_buffer(buffer, new_candle):
+    """
+    يقوم بتحديث المخزن (buffer) ليحتوي على آخر شمعتين فقط.
+    """
+    if len(buffer) == 2:
+        buffer.pop(0)
+    buffer.append(new_candle)
+    return buffer
 
 @bot.command()
 async def alert(ctx, symbol: str, target_price: float):
@@ -39,7 +52,8 @@ async def alert(ctx, symbol: str, target_price: float):
     
     alerts[ctx.guild.id][symbol.upper()] = {
         "target_price": target_price,
-        "channel_id": ctx.channel.id
+        "channel_id": ctx.channel.id,
+        "candle_buffer": []  # يبدأ المخزن فارغاً
     }
     
     msg = f"✅ تم ضبط تنبيه لـ **{symbol.upper()}** عند السعر **{target_price}** في هذه القناة."
@@ -49,13 +63,11 @@ async def alert(ctx, symbol: str, target_price: float):
 @tasks.loop(seconds=CHECK_INTERVAL)
 async def check_prices():
     logger.debug("🔎 بدء فحص الأسعار...")
-
     # المرور على التنبيهات لكل سيرفر
     for guild_id, guild_alerts in list(alerts.items()):
         for symbol, alert_data in list(guild_alerts.items()):
             target_price = alert_data["target_price"]
             channel_id = alert_data["channel_id"]
-            
             try:
                 handler = TA_Handler(
                     symbol=symbol,
@@ -67,15 +79,31 @@ async def check_prices():
                 indicators = analysis.indicators
                 high_price = float(indicators.get('high', 0))
                 low_price = float(indicators.get('low', 0))
-                logger.debug(f"🔹 {symbol}: High={high_price}, Low={low_price}")
-                
-                # التحقق مما إذا كان السعر الهدف ضمن نطاق الشمعة
-                if low_price <= target_price <= high_price:
-                    channel = bot.get_channel(channel_id)
-                    if channel:
-                        await channel.send(f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** خلال آخر 5 دقائق!")
-                        logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
-                    del alerts[guild_id][symbol]
+                current_time = analysis.time  # نفترض أن analysis.time يحتوي على توقيت الشمعة الحالية
+
+                # إنشاء بيانات الشمعة الجديدة
+                new_candle = {"time": current_time, "high": high_price, "low": low_price}
+                # تحديث المخزن الخاص بهذا التنبيه
+                alert_data["candle_buffer"] = update_candle_buffer(alert_data["candle_buffer"], new_candle)
+
+                # إذا كانت لدينا بيانات الشمعتين الأخيرتين، نجمعهما
+                if len(alert_data["candle_buffer"]) == 2:
+                    combined_high = max(alert_data["candle_buffer"][0]["high"],
+                                        alert_data["candle_buffer"][1]["high"])
+                    combined_low = min(alert_data["candle_buffer"][0]["low"],
+                                       alert_data["candle_buffer"][1]["low"])
+                    logger.debug(f"🔹 {symbol}: Combined High={combined_high}, Combined Low={combined_low}")
+
+                    # التحقق مما إذا كان السعر الهدف ضمن النطاق الموحد للشمعتين
+                    if combined_low <= target_price <= combined_high:
+                        channel = bot.get_channel(channel_id)
+                        if channel:
+                            await channel.send(
+                                f"🚨 تنبيه: **{symbol}** لمس السعر المطلوب **{target_price}** باستخدام آخر شمعتين!"
+                            )
+                            logger.debug(f"✅ تم إرسال التنبيه لـ {symbol} إلى القناة {channel_id}")
+                        # حذف التنبيه بعد الإرسال لمنع التكرار
+                        del alerts[guild_id][symbol]
             except Exception as e:
                 logger.error(f"⚠️ خطأ أثناء جلب بيانات {symbol}: {e}")
 
@@ -105,7 +133,8 @@ async def on_ready():
                                 if symbol_found.upper() not in alerts[guild.id]:
                                     alerts[guild.id][symbol_found.upper()] = {
                                         "target_price": target_price_found,
-                                        "channel_id": channel.id
+                                        "channel_id": channel.id,
+                                        "candle_buffer": []  # يبدأ المخزن فارغاً
                                     }
                                     logger.debug(f"↻ إعادة ضبط تنبيه: {symbol_found.upper()} عند {target_price_found} في القناة {channel.id}")
                         # إذا كانت الرسالة تحتوي على تنبيه مفعل (مثال: "🚨 تنبيه: ...") فلا نقوم بأي إجراء
