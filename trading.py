@@ -87,17 +87,17 @@ async def check_prices():
 async def on_ready():
     logger.info(f"✅ تم تسجيل الدخول كـ {bot.user}")
     
-    # عند بدء التشغيل، نقوم بفحص كل قناة في كل سيرفر لاستعادة التنبيهات غير المنفذة
+    # عند بدء التشغيل، نقوم بفحص الرسائل في كل قناة نصية في كل سيرفر لاستعادة التنبيهات غير المنفذة
     for guild in bot.guilds:
         for channel in guild.text_channels:
             try:
-                # جلب آخر 10 رسائل من القناة (للزيادة في احتمالية العثور على الرسائل المطلوبة)
-                messages = await channel.history(limit=10).flatten()
+                # جلب آخر 50 رسالة من القناة
+                messages = [msg async for msg in channel.history(limit=50)]
                 for msg in messages:
                     # نبحث فقط عن رسائل البوت
-                    if msg.author == bot.user:
+                    if msg.author.id == bot.user.id:
                         content = msg.content
-                        # إذا كانت الرسالة من نوع "تم ضبط تنبيه ..." (أي لم يتم إرسال التنبيه بعد)
+                        # إذا كانت الرسالة تحتوي على "تم ضبط تنبيه" ولا تحتوي على "تنبيه:"
                         if "تم ضبط تنبيه" in content and "تنبيه:" not in content:
                             # استخراج العملة والسعر باستخدام تعبير منتظم
                             pattern = r"تم ضبط تنبيه لـ \*\*(.+?)\*\* عند السعر \*\*(.+?)\*\* في هذه القناة\."
@@ -108,15 +108,14 @@ async def on_ready():
                                     target_price_found = float(match.group(2))
                                 except ValueError:
                                     continue
-                                # التأكد من عدم وجود رسالة تنبيه (🚨 تنبيه:) لاحقة لنفس العملة والسعر
+                                # التأكد من عدم وجود رسالة تنبيه (🚨 تنبيه:) لنفس العملة والسعر في نفس المجموعة من الرسائل
                                 alert_already_sent = False
                                 for m in messages:
-                                    if m.author == bot.user and "تنبيه:" in m.content:
+                                    if m.author.id == bot.user.id and "تنبيه:" in m.content:
                                         if symbol_found in m.content and str(target_price_found) in m.content:
                                             alert_already_sent = True
                                             break
                                 if not alert_already_sent:
-                                    # إعادة تسجيل التنبيه في القائمة
                                     if guild.id not in alerts:
                                         alerts[guild.id] = {}
                                     if symbol_found not in alerts[guild.id]:
