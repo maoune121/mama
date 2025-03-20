@@ -67,11 +67,11 @@ SCREENER_CHOICES = [
     app_commands.Choice(name="stocks", value="america"),  # American stocks
 ]
 
-# Choices for exchange in the slash command
+# Choices for exchange in the slash command (FXCM removed, replaced with FX)
 EXCHANGE_CHOICES = [
     app_commands.Choice(name="OANDA", value="OANDA"),
     app_commands.Choice(name="BINANCE", value="BINANCE"),
-    app_commands.Choice(name="FXCM", value="FXCM"),
+    app_commands.Choice(name="FX", value="FX"),
     app_commands.Choice(name="PEPPERSTONE", value="PEPPERSTONE"),
     app_commands.Choice(name="FOREXCOM", value="FOREXCOM"),
 ]
