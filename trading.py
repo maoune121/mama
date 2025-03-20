@@ -109,7 +109,12 @@ async def check_prices():
                     guild_alerts.remove(alert_obj)
                     logger.info(f"Alert triggered for {symbol} at {target_price} in guild {guild_id}")
             except Exception as e:
+                channel = bot.get_channel(channel_id)
+                if channel:
+                    await channel.send(f"هناك خطأ في معالجة التنبيه للرمز {symbol}.")
                 logger.error(f"Error fetching data for {symbol} ({screener}, {exchange}): {e}")
+                # حذف التنبيه إذا حدث خطأ
+                guild_alerts.remove(alert_obj)
 
 @bot.event
 async def on_ready():
