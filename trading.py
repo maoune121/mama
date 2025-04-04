@@ -55,6 +55,7 @@ class MyBot(commands.Bot):
         await self.tree.sync()
         logger.info("Slash commands synced.")
         check_prices.start()
+        keep_alive_message.start()
 
 bot = MyBot()
 
@@ -115,6 +116,10 @@ async def check_prices():
                 logger.error(f"Error fetching data for {symbol} ({screener}, {exchange}): {e}")
                 # حذف التنبيه إذا حدث خطأ
                 guild_alerts.remove(alert_obj)
+
+@tasks.loop(seconds=60)
+async def keep_alive_message():
+    logger.info("أنا شغال ومفيش نوم!")
 
 @bot.event
 async def on_ready():
